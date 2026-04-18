@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
 
 try:
     from pynput import keyboard
@@ -25,7 +25,7 @@ class GlobalHotkeyManager(QObject):
             return
 
         try:
-            self._listener = keyboard.GlobalHotKeys({hotkey: self._emit_activated})
+            self._listener = keyboard.GlobalHotKeys({hotkey: self._on_hotkey_pressed})
             self._listener.start()
         except Exception as exc:  # pragma: no cover - depends on OS hooks
             self._listener = None
@@ -36,5 +36,10 @@ class GlobalHotkeyManager(QObject):
             self._listener.stop()
             self._listener = None
 
+    def _on_hotkey_pressed(self) -> None:
+        """Called from pynput's background thread — marshal to the Qt main thread."""
+        QMetaObject.invokeMethod(self, "_emit_activated", Qt.QueuedConnection)
+
+    @Slot()
     def _emit_activated(self) -> None:
         self.activated.emit()

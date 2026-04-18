@@ -325,13 +325,19 @@ class MainWindow(QMainWindow):
             if key in {Qt.Key_Return, Qt.Key_Enter} and self.history_list.selectedItems():
                 self._emit_copy_request()
                 return True
-            # Vim keys → navigate
-            if key in {Qt.Key_H, Qt.Key_J, Qt.Key_K, Qt.Key_L}:
-                self._move_with_vim_key(key)
+            # Vim keys and arrow keys → navigate without changing selection
+            nav_map = {
+                Qt.Key_H: "left", Qt.Key_Left: "left",
+                Qt.Key_L: "right", Qt.Key_Right: "right",
+                Qt.Key_J: "down", Qt.Key_Down: "down",
+                Qt.Key_K: "up", Qt.Key_Up: "up",
+            }
+            if key in nav_map:
+                self._navigate(nav_map[key])
                 return True
         return super().eventFilter(watched, event)
 
-    def _move_with_vim_key(self, key: int) -> None:
+    def _navigate(self, direction: str) -> None:
         from PySide6.QtCore import QItemSelectionModel
 
         count = self.history_list.count()
@@ -346,13 +352,13 @@ class MainWindow(QMainWindow):
         viewport_w = self.history_list.viewport().width()
         cols = max(1, viewport_w // grid_w) if grid_w > 0 else 1
 
-        if key == Qt.Key_H:
+        if direction == "left":
             new_row = max(0, current_row - 1)
-        elif key == Qt.Key_L:
+        elif direction == "right":
             new_row = min(count - 1, current_row + 1)
-        elif key == Qt.Key_J:
+        elif direction == "down":
             new_row = min(count - 1, current_row + cols)
-        elif key == Qt.Key_K:
+        elif direction == "up":
             new_row = max(0, current_row - cols)
         else:
             return
@@ -362,6 +368,7 @@ class MainWindow(QMainWindow):
             # NoUpdate keeps existing multi-selection intact; only moves focus
             self.history_list.setCurrentItem(target_item, QItemSelectionModel.NoUpdate)
             self.history_list.scrollToItem(target_item)
+
 
     def _show_preview_for_item(self, item: QListWidgetItem) -> None:
         image_path = item.data(Qt.UserRole)
