@@ -306,6 +306,8 @@ class MainWindow(QMainWindow):
         else:
             # First load or no prior selection → select all
             self.history_list.selectAll()
+            if self.history_list.count() > 0:
+                self.history_list.setCurrentItem(self.history_list.item(0))
         self._sync_selection_state()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
@@ -330,6 +332,8 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _move_with_vim_key(self, key: int) -> None:
+        from PySide6.QtCore import QItemSelectionModel
+
         count = self.history_list.count()
         if count == 0:
             return
@@ -353,8 +357,11 @@ class MainWindow(QMainWindow):
         else:
             return
 
-        self.history_list.setCurrentRow(new_row)
-        self.history_list.scrollToItem(self.history_list.item(new_row))
+        target_item = self.history_list.item(new_row)
+        if target_item is not None:
+            # NoUpdate keeps existing multi-selection intact; only moves focus
+            self.history_list.setCurrentItem(target_item, QItemSelectionModel.NoUpdate)
+            self.history_list.scrollToItem(target_item)
 
     def _show_preview_for_item(self, item: QListWidgetItem) -> None:
         image_path = item.data(Qt.UserRole)
