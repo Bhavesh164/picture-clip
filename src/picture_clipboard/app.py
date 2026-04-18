@@ -52,8 +52,7 @@ class PictureClipboardApp:
     def run(self) -> int:
         self.monitor.start()
         self.hotkey_manager.start(self.settings.global_hotkey)
-        if not self.settings.start_hidden:
-            self.window.show_window()
+        self.window.show_window()
         return self.qt_app.exec()
 
     def capture_image(self, image: QImage) -> None:

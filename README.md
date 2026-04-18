@@ -113,6 +113,12 @@ Output:
 
 If you want a single-file Windows executable instead, add `--onefile`, but startup will be slower.
 
+if we want to remove the preious build and make the build again
+
+```bash
+rm -rf build/ dist/ && .venv/bin/pyinstaller PictureClipboard.spec --noconfirm
+```
+
 ## Release Notes
 
 After building, test these on the target OS:
