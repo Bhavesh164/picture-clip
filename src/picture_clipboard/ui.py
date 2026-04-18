@@ -58,6 +58,8 @@ class MainWindow(QMainWindow):
         self._preview_dialog: QuickPreviewDialog | None = None
         self._default_thumbnail_columns = 4
         self._minimum_thumbnail_cell_width = 180
+        self._thumbnail_layout_slack = 16
+        self._window_presented = False
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -112,8 +114,8 @@ class MainWindow(QMainWindow):
         body = QGridLayout()
         body.setHorizontalSpacing(12)
         body.setVerticalSpacing(12)
-        body.setColumnStretch(0, 7)
-        body.setColumnStretch(1, 2)
+        body.setColumnStretch(0, 1)
+        body.setColumnStretch(1, 0)
         root.addLayout(body, stretch=1)
 
         self.history_list = QListWidget()
@@ -224,21 +226,38 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        self._window_presented = True
         self._focus_history_list()
 
+    def hide_window(self) -> None:
+        self._window_presented = False
+        self.setWindowState(self.windowState() | Qt.WindowMinimized)
+        self.hide()
+
     def toggle_visibility(self) -> None:
-        if self.isVisible() and not self.isMinimized():
-            self.hide()
+        if self.is_presented():
+            self.hide_window()
             return
         self.show_window()
 
+    def is_presented(self) -> bool:
+        return self._window_presented
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         if self.tray_icon.isVisible():
-            self.hide()
+            self.hide_window()
             self.set_status("App hidden to tray")
             event.ignore()
             return
         super().closeEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        self._window_presented = not self.isMinimized()
+        super().showEvent(event)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        self._window_presented = False
+        super().hideEvent(event)
 
     def notify_hotkey_issue(self, message: str) -> None:
         self.tray_icon.showMessage(
@@ -422,7 +441,8 @@ class MainWindow(QMainWindow):
             return
 
         columns = self._resolved_thumbnail_columns(viewport_width)
-        cell_width = max(150, viewport_width // columns)
+        available_width = max(150, viewport_width - self._thumbnail_layout_slack)
+        cell_width = max(150, available_width // columns)
         item_width = max(138, cell_width - 8)
         icon_width = max(122, item_width - 16)
         icon_height = max(84, round(icon_width * 124 / 180))
