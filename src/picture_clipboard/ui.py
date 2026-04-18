@@ -226,6 +226,9 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        app = QApplication.instance()
+        if app is not None:
+            app.setActiveWindow(self)
         self._window_presented = True
         self._focus_history_list()
 
@@ -235,10 +238,10 @@ class MainWindow(QMainWindow):
         self.hide()
 
     def toggle_visibility(self) -> None:
-        if self.is_presented():
+        if self.isVisible() and not self.isMinimized() and self.isActiveWindow():
             self.hide_window()
-            return
-        self.show_window()
+        else:
+            self.show_window()
 
     def is_presented(self) -> bool:
         return self._window_presented
@@ -482,6 +485,30 @@ class MainWindow(QMainWindow):
         self._preview_dialog.show()
         self._preview_dialog.raise_()
         self._preview_dialog.activateWindow()
+
+    def _navigate_preview(self, offset: int) -> None:
+        if self.history_list.count() == 0:
+            return
+        current_item = self.history_list.currentItem()
+        if current_item is None and self.history_list.selectedItems():
+            current_item = self.history_list.selectedItems()[0]
+        
+        if current_item is None:
+            current_row = 0
+        else:
+            current_row = self.history_list.row(current_item)
+            
+        new_row = current_row + offset
+        if new_row < 0:
+            new_row = 0
+        elif new_row >= self.history_list.count():
+            new_row = self.history_list.count() - 1
+            
+        target_item = self.history_list.item(new_row)
+        if target_item is not None and target_item.flags() != Qt.NoItemFlags:
+            self._select_item(target_item)
+            self.history_list.scrollToItem(target_item)
+            self._show_preview_for_item(target_item)
 
     def _stacked_setting(self, label_text: str, field: QWidget) -> QVBoxLayout:
         layout = QVBoxLayout()
@@ -747,8 +774,19 @@ class QuickPreviewDialog(QWidget):
         self.image_label.setPixmap(scaled)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
-        if event.key() == Qt.Key_Escape:
+        key = event.key()
+        if key == Qt.Key_Escape:
             self.close()
+            event.accept()
+            return
+        elif key in {Qt.Key_H, Qt.Key_Left, Qt.Key_K, Qt.Key_Up}:
+            if hasattr(self.parent(), "_navigate_preview"):
+                self.parent()._navigate_preview(-1)
+            event.accept()
+            return
+        elif key in {Qt.Key_L, Qt.Key_Right, Qt.Key_J, Qt.Key_Down}:
+            if hasattr(self.parent(), "_navigate_preview"):
+                self.parent()._navigate_preview(1)
             event.accept()
             return
         super().keyPressEvent(event)
