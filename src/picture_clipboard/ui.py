@@ -181,6 +181,12 @@ class MainWindow(QMainWindow):
         self.deselect_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
         self.deselect_shortcut.activated.connect(self.history_list.clearSelection)
 
+        self.copy_shortcut = QShortcut(QKeySequence.Copy, self)
+        self.copy_shortcut.activated.connect(self._emit_copy_request)
+
+        self.copy_c_shortcut = QShortcut(QKeySequence(Qt.Key_C), self)
+        self.copy_c_shortcut.activated.connect(self._emit_copy_request)
+
         self._init_tray()
         self._apply_styles()
         # Intercept Space on the list widget for quick preview
@@ -260,14 +266,14 @@ class MainWindow(QMainWindow):
         self.copy_button.setEnabled(len(self.history_list.selectedItems()) > 0)
 
     def _render_history(self) -> None:
-        selected_path = None
-        current_item = self.history_list.currentItem()
-        if current_item is not None:
-            selected_path = current_item.data(Qt.UserRole)
+        selected_paths: set[str] = set()
+        for sel in self.history_list.selectedItems():
+            p = sel.data(Qt.UserRole)
+            if p is not None:
+                selected_paths.add(str(p))
 
         self.history_list.clear()
         visible_items = self._history if self._visible_limit is None else self._history[: self._visible_limit]
-        restored_selection = False
         for item in visible_items:
             pixmap = QPixmap(item.preview_path)
             list_item = QListWidgetItem(QIcon(pixmap), f"{item.width} x {item.height}")
@@ -281,56 +287,74 @@ class MainWindow(QMainWindow):
             thumb_font.setPointSize(11)
             list_item.setFont(thumb_font)
             self.history_list.addItem(list_item)
-            if selected_path is not None and item.image_path == selected_path:
-                self.history_list.setCurrentItem(list_item)
-                restored_selection = True
 
         if not visible_items:
             placeholder = QListWidgetItem("No clipboard images captured yet")
             placeholder.setFlags(Qt.NoItemFlags)
             self.history_list.addItem(placeholder)
-        elif not restored_selection and self.history_list.count() > 0:
-            self.history_list.setCurrentRow(0)
+        elif selected_paths:
+            restored_any = False
+            for i in range(self.history_list.count()):
+                w = self.history_list.item(i)
+                if str(w.data(Qt.UserRole)) in selected_paths:
+                    w.setSelected(True)
+                    if not restored_any:
+                        self.history_list.setCurrentItem(w)
+                    restored_any = True
+            if not restored_any:
+                self.history_list.selectAll()
+        else:
+            # First load or no prior selection → select all
             self.history_list.selectAll()
         self._sync_selection_state()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         if watched is self.history_list and event.type() == QEvent.KeyPress:
             key = event.key()
+            # Space → quick preview
             if key == Qt.Key_Space and not event.isAutoRepeat():
                 item = self.history_list.currentItem()
                 if item is None and self.history_list.selectedItems():
                     item = self.history_list.selectedItems()[0]
                 if item is not None:
                     self._show_preview_for_item(item)
-                    return True  # consumed
+                    return True
+            # Enter / Return → copy selected
+            if key in {Qt.Key_Return, Qt.Key_Enter} and self.history_list.selectedItems():
+                self._emit_copy_request()
+                return True
+            # Vim keys → navigate
+            if key in {Qt.Key_H, Qt.Key_J, Qt.Key_K, Qt.Key_L}:
+                self._move_with_vim_key(key)
+                return True
         return super().eventFilter(watched, event)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
-        if event.key() in {Qt.Key_Return, Qt.Key_Enter} and self.history_list.selectedItems():
-            self._emit_copy_request()
-            event.accept()
+    def _move_with_vim_key(self, key: int) -> None:
+        count = self.history_list.count()
+        if count == 0:
             return
-        if event.text() in {"h", "j", "k", "l"}:
-            self._move_with_vim_key(event.text())
-            event.accept()
-            return
-        super().keyPressEvent(event)
+        current_row = self.history_list.currentRow()
+        if current_row < 0:
+            current_row = 0
 
-    def _move_with_vim_key(self, key: str) -> None:
-        current_index = self.history_list.currentIndex()
-        if not current_index.isValid():
+        # Calculate how many items fit per row by inspecting the grid
+        grid_w = self.history_list.gridSize().width()
+        viewport_w = self.history_list.viewport().width()
+        cols = max(1, viewport_w // grid_w) if grid_w > 0 else 1
+
+        if key == Qt.Key_H:
+            new_row = max(0, current_row - 1)
+        elif key == Qt.Key_L:
+            new_row = min(count - 1, current_row + 1)
+        elif key == Qt.Key_J:
+            new_row = min(count - 1, current_row + cols)
+        elif key == Qt.Key_K:
+            new_row = max(0, current_row - cols)
+        else:
             return
-        movement = {
-            "h": QAbstractItemView.MoveLeft,
-            "j": QAbstractItemView.MoveDown,
-            "k": QAbstractItemView.MoveUp,
-            "l": QAbstractItemView.MoveRight,
-        }[key]
-        next_index = self.history_list.moveCursor(movement, Qt.NoModifier)
-        if next_index.isValid():
-            self.history_list.setCurrentIndex(next_index)
-            self.history_list.scrollTo(next_index)
+
+        self.history_list.setCurrentRow(new_row)
+        self.history_list.scrollToItem(self.history_list.item(new_row))
 
     def _show_preview_for_item(self, item: QListWidgetItem) -> None:
         image_path = item.data(Qt.UserRole)
@@ -499,9 +523,10 @@ class HelpDialog(QDialog):
             (launch_hotkey, "Show or hide the app globally"),
             ("h j k l or Arrow Keys", "Move through saved thumbnails"),
             ("Space", "Open quick preview for the focused image"),
-            ("Enter / Return", "Copy selected image(s) back to the clipboard"),
+            ("c", "Copy selected image(s) to the clipboard"),
+            ("Enter / Return", "Copy selected image(s) to the clipboard"),
             ("Click", "Toggle selection on an image"),
-            ("Cmd+A", "Select all images"),
+            ("Cmd+A / Ctrl+A", "Select all images"),
             ("Esc", "Deselect all images"),
             ("10 / 20 / All", "Change how many thumbnails are visible"),
         ]

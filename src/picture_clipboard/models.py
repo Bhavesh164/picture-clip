@@ -93,7 +93,7 @@ class AppSettings:
     max_images: int = 5
     poll_interval_ms: int = 700
     global_hotkey: str = default_global_hotkey()
-    start_hidden: bool = True
+    start_hidden: bool = False
 
     def normalized(self) -> "AppSettings":
         return AppSettings(
@@ -112,5 +112,5 @@ class AppSettings:
             max_images=int(value.get("max_images", 5)),
             poll_interval_ms=int(value.get("poll_interval_ms", 700)),
             global_hotkey=str(value.get("global_hotkey", default_global_hotkey())),
-            start_hidden=bool(value.get("start_hidden", True)),
+            start_hidden=bool(value.get("start_hidden", False)),
         ).normalized()
