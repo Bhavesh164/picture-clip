@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, QUrl, QMimeData
@@ -46,7 +47,8 @@ class PictureClipboardApp:
         self.monitor.on_image_captured(self.capture_image)
 
         self.hotkey_manager = GlobalHotkeyManager(self.window)
-        self.hotkey_manager.activated.connect(self.window.toggle_visibility)
+        self._last_hotkey_toggle_at = 0.0
+        self.hotkey_manager.activated.connect(self.handle_hotkey_activation)
         self.hotkey_manager.error.connect(self.window.notify_hotkey_issue)
 
     def run(self) -> int:
@@ -128,6 +130,13 @@ class PictureClipboardApp:
 
     def open_storage_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.store.root_dir)))
+
+    def handle_hotkey_activation(self) -> None:
+        now = time.monotonic()
+        if now - self._last_hotkey_toggle_at < 0.35:
+            return
+        self._last_hotkey_toggle_at = now
+        self.window.toggle_visibility()
 
 
 def main() -> int:

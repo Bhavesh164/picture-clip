@@ -19,6 +19,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSpinBox,
     QApplication,
     QCheckBox,
     QGridLayout,
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
         self._history: list[HistoryItem] = []
         self._visible_limit: int | None = 10
         self._preview_dialog: QuickPreviewDialog | None = None
+        self._default_thumbnail_columns = 4
+        self._minimum_thumbnail_cell_width = 180
 
         central = QWidget(self)
         self.setCentralWidget(central)
@@ -189,9 +192,11 @@ class MainWindow(QMainWindow):
 
         self._init_tray()
         self._apply_styles()
-        # Intercept Space on the list widget for quick preview
-        self.history_list.installEventFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
         self.history_list.setFocus()
+        self._update_history_layout_metrics()
 
     def set_history(self, history: list[HistoryItem]) -> None:
         self._history = history
@@ -215,9 +220,11 @@ class MainWindow(QMainWindow):
         self._render_history()
 
     def show_window(self) -> None:
+        self.showNormal()
         self.show()
         self.raise_()
         self.activateWindow()
+        self._focus_history_list()
 
     def toggle_visibility(self) -> None:
         if self.isVisible() and not self.isMinimized():
@@ -301,17 +308,23 @@ class MainWindow(QMainWindow):
                     if not restored_any:
                         self.history_list.setCurrentItem(w)
                     restored_any = True
-            if not restored_any:
-                self.history_list.selectAll()
+            if not restored_any and self.history_list.count() > 0:
+                self._select_item(self.history_list.item(0))
         else:
-            # First load or no prior selection → select all
-            self.history_list.selectAll()
+            # First load defaults to the most recent image.
             if self.history_list.count() > 0:
-                self.history_list.setCurrentItem(self.history_list.item(0))
+                self._select_item(self.history_list.item(0))
+        self._update_history_layout_metrics()
         self._sync_selection_state()
 
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        if watched is self.history_list and event.type() == QEvent.KeyPress:
+        if watched in {self.history_list, self.history_list.viewport()} and event.type() in {
+            QEvent.Resize,
+            QEvent.Show,
+            QEvent.LayoutRequest,
+        }:
+            self._update_history_layout_metrics()
+        if watched in {self.history_list, self.history_list.viewport()} and event.type() == QEvent.KeyPress:
             key = event.key()
             # Space → quick preview
             if key == Qt.Key_Space and not event.isAutoRepeat():
@@ -325,21 +338,56 @@ class MainWindow(QMainWindow):
             if key in {Qt.Key_Return, Qt.Key_Enter} and self.history_list.selectedItems():
                 self._emit_copy_request()
                 return True
-            # Vim keys and arrow keys → navigate without changing selection
-            nav_map = {
-                Qt.Key_H: "left", Qt.Key_Left: "left",
-                Qt.Key_L: "right", Qt.Key_Right: "right",
-                Qt.Key_J: "down", Qt.Key_Down: "down",
-                Qt.Key_K: "up", Qt.Key_Up: "up",
-            }
-            if key in nav_map:
-                self._navigate(nav_map[key])
+        if event.type() in {QEvent.ShortcutOverride, QEvent.KeyPress} and self._should_handle_navigation_event(watched, event):
+            if event.type() == QEvent.ShortcutOverride:
+                event.accept()
                 return True
+            self._navigate(self._navigation_direction(event.key()))
+            return True
         return super().eventFilter(watched, event)
 
-    def _navigate(self, direction: str) -> None:
+    def _should_handle_navigation_event(self, watched, event) -> bool:
+        if QApplication.activeWindow() is not self:
+            return False
+        focus_widget = QApplication.focusWidget()
+        if focus_widget is None or not self._belongs_to_main_window(focus_widget):
+            return False
+        if self._navigation_keys_blocked(focus_widget):
+            return False
+        return self._navigation_direction(event.key()) is not None
+
+    def _navigation_direction(self, key: int) -> str | None:
+        nav_map = {
+            Qt.Key_H: "left",
+            Qt.Key_Left: "left",
+            Qt.Key_L: "right",
+            Qt.Key_Right: "right",
+            Qt.Key_J: "down",
+            Qt.Key_Down: "down",
+            Qt.Key_K: "up",
+            Qt.Key_Up: "up",
+        }
+        return nav_map.get(key)
+
+    def _navigation_keys_blocked(self, focus_widget: QWidget) -> bool:
+        return isinstance(focus_widget, (QLineEdit, QAbstractSpinBox))
+
+    def _belongs_to_main_window(self, widget: QWidget) -> bool:
+        return widget is self or self.isAncestorOf(widget)
+
+    def _focus_history_list(self) -> None:
+        if self.history_list.count() == 0:
+            return
+        if self.history_list.currentItem() is None:
+            self.history_list.setCurrentRow(0)
+        self.history_list.setFocus(Qt.OtherFocusReason)
+
+    def _select_item(self, item: QListWidgetItem) -> None:
         from PySide6.QtCore import QItemSelectionModel
 
+        self.history_list.setCurrentItem(item, QItemSelectionModel.ClearAndSelect)
+
+    def _navigate(self, direction: str) -> None:
         count = self.history_list.count()
         if count == 0:
             return
@@ -365,9 +413,39 @@ class MainWindow(QMainWindow):
 
         target_item = self.history_list.item(new_row)
         if target_item is not None:
-            # NoUpdate keeps existing multi-selection intact; only moves focus
-            self.history_list.setCurrentItem(target_item, QItemSelectionModel.NoUpdate)
+            self._select_item(target_item)
             self.history_list.scrollToItem(target_item)
+
+    def _update_history_layout_metrics(self) -> None:
+        viewport_width = self.history_list.viewport().width()
+        if viewport_width <= 0:
+            return
+
+        columns = self._resolved_thumbnail_columns(viewport_width)
+        cell_width = max(150, viewport_width // columns)
+        item_width = max(138, cell_width - 8)
+        icon_width = max(122, item_width - 16)
+        icon_height = max(84, round(icon_width * 124 / 180))
+        cell_height = icon_height + 34
+        item_height = cell_height - 8
+
+        self.history_list.setGridSize(QSize(cell_width, cell_height))
+        self.history_list.setIconSize(QSize(icon_width, icon_height))
+
+        for index in range(self.history_list.count()):
+            item = self.history_list.item(index)
+            if item.flags() == Qt.NoItemFlags:
+                continue
+            item.setSizeHint(QSize(item_width, item_height))
+
+    def _resolved_thumbnail_columns(self, viewport_width: int) -> int:
+        if viewport_width >= self._default_thumbnail_columns * self._minimum_thumbnail_cell_width:
+            return self._default_thumbnail_columns
+        return max(1, viewport_width // self._minimum_thumbnail_cell_width)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._update_history_layout_metrics()
 
 
     def _show_preview_for_item(self, item: QListWidgetItem) -> None:

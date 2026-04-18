@@ -2,7 +2,7 @@
 # build.sh — Build PictureClipboard standalone executables for the current platform.
 # Usage: ./build.sh
 #
-# On macOS  → produces dist/PictureClipboard.app  (+ dist/PictureClipboard/)
+# On macOS  → produces dist/PictureClipboard.app and dist/PictureClipboard.dmg
 # On Linux  → produces dist/PictureClipboard/
 # On Windows (via Git Bash / WSL) → produces dist/PictureClipboard/
 #
@@ -18,7 +18,31 @@ echo "==> Cleaning previous build artifacts..."
 rm -rf build/ dist/
 
 echo "==> Building PictureClipboard with PyInstaller..."
-.venv/bin/pyinstaller PictureClipboard.spec --noconfirm
+.venv/bin/pyinstaller PictureClipboard.spec --clean --noconfirm
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    APP_PATH="dist/PictureClipboard.app"
+    DMG_PATH="dist/PictureClipboard.dmg"
+
+    if [[ ! -d "$APP_PATH" ]]; then
+        echo "Expected app bundle at $APP_PATH but it was not created." >&2
+        exit 1
+    fi
+
+    echo "==> Creating macOS disk image..."
+    staging_dir="$(mktemp -d)"
+    cp -R "$APP_PATH" "$staging_dir/"
+    ln -s /Applications "$staging_dir/Applications"
+    hdiutil create \
+        -volname "Picture Clipboard" \
+        -srcfolder "$staging_dir" \
+        -ov \
+        -format UDZO \
+        "$DMG_PATH" >/dev/null
+    rm -rf "$staging_dir"
+    rm -rf dist/PictureClipboard
+    rm -f dist/.DS_Store
+fi
 
 echo ""
 echo "==> Build complete!"
@@ -29,7 +53,7 @@ echo ""
 case "$(uname -s)" in
     Darwin)
         echo "    macOS app bundle: dist/PictureClipboard.app"
-        echo "    Directory build:  dist/PictureClipboard/"
+        echo "    Disk image:       dist/PictureClipboard.dmg"
         ;;
     Linux)
         echo "    Directory build:  dist/PictureClipboard/"
