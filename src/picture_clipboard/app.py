@@ -133,7 +133,7 @@ class PictureClipboardApp:
 
     def handle_hotkey_activation(self) -> None:
         now = time.monotonic()
-        if now - self._last_hotkey_toggle_at < 0.75:
+        if now - self._last_hotkey_toggle_at < 0.3:
             return
         self._last_hotkey_toggle_at = now
         self.window.toggle_visibility()

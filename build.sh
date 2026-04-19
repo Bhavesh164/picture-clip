@@ -32,6 +32,13 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
     echo "==> Creating macOS disk image..."
     staging_dir="$(mktemp -d)"
     cp -R "$APP_PATH" "$staging_dir/"
+    
+    # Remove quarantine attribute before packaging to avoid gatekeeper issues
+    xattr -cr "$staging_dir/PictureClipboard.app"
+    
+    # Ad-hoc sign the app to fix Accessibility permission issues for global hooks
+    codesign --force --deep --sign - "$staging_dir/PictureClipboard.app"
+
     ln -s /Applications "$staging_dir/Applications"
     hdiutil create \
         -volname "Picture Clipboard" \

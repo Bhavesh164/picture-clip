@@ -225,6 +225,16 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        
+        # On macOS, forcefully bring the app to the front
+        if sys.platform == "darwin":
+            try:
+                from AppKit import NSApplication, NSApplicationActivateIgnoringOtherApps
+                ns_app = NSApplication.sharedApplication()
+                ns_app.activateIgnoringOtherApps_(True)
+            except Exception:
+                pass
+
         app = QApplication.instance()
         if app is not None:
             app.setActiveWindow(self)

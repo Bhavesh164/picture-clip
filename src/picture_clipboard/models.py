@@ -6,7 +6,7 @@ from typing import Any
 
 
 def default_global_hotkey() -> str:
-    return "<cmd>+<shift>+v"
+    return "<ctrl>+<shift>+b"
 
 
 def normalize_global_hotkey(hotkey: str) -> str:
@@ -15,24 +15,15 @@ def normalize_global_hotkey(hotkey: str) -> str:
         return default_global_hotkey()
 
     aliases = {
+        "<ctrl>+<shift>+b",
+        "ctrl+shift+b",
+        "control+shift+b",
         "<cmd>+<shift>+v",
-        "<super>+<shift>+v",
-        "<win>+<shift>+v",
-        "command+shift+v",
         "cmd+shift+v",
-        "windows+shift+v",
-        "win+shift+v",
-        "super+shift+v",
+        "command+shift+v",
     }
     if cleaned in aliases:
-        return "<cmd>+<shift>+v"
-
-    legacy_default_aliases = {
-        "<ctrl>+<shift>+v",
-        "ctrl+shift+v",
-    }
-    if cleaned in legacy_default_aliases:
-        return default_global_hotkey()
+        return "<ctrl>+<shift>+b"
 
     return cleaned
 
