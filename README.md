@@ -2,6 +2,8 @@
 
 Picture Clipboard is a cross-platform Python desktop app for image-only clipboard history. It watches the system clipboard, keeps a bounded history of copied images, shows previews, and lets you copy a previous image back to the clipboard.
 
+![Preview](assets/pic.gif)
+
 ## Features
 
 - Image-only capture. Text and files are ignored.
