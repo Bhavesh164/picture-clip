@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
         self.history_list.setUniformItemSizes(True)
         self.history_list.setWrapping(True)
         self.history_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        self.history_list.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.history_list.setDragEnabled(False)
         self.history_list.itemSelectionChanged.connect(self._sync_selection_state)
         self.history_list.itemDoubleClicked.connect(lambda _: self._emit_copy_request())
