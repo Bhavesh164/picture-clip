@@ -17,7 +17,7 @@ Picture Clipboard is a cross-platform Python desktop app for image-only clipboar
 - `Space`: Open quick preview for the focused image
 - `Cmd+C`: Copy selected image(s) back to the clipboard
 - `Click`: Toggle selection on an image (click again to deselect)
-- `Cmd+A`: Select all images
+- `Cmd+A`: Select / Deselect all images
 - `Esc`: Deselect all images
 - `?`: Open the Help menu
 

@@ -181,7 +181,7 @@ class MainWindow(QMainWindow):
         self.help_shortcut.activated.connect(self.show_help_dialog)
 
         self.select_all_shortcut = QShortcut(QKeySequence.SelectAll, self)
-        self.select_all_shortcut.activated.connect(self.history_list.selectAll)
+        self.select_all_shortcut.activated.connect(self._toggle_select_all)
 
         self.deselect_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
         self.deselect_shortcut.activated.connect(self.history_list.clearSelection)
@@ -293,6 +293,23 @@ class MainWindow(QMainWindow):
 
     def _sync_selection_state(self) -> None:
         self.copy_button.setEnabled(len(self.history_list.selectedItems()) > 0)
+
+    def _toggle_select_all(self) -> None:
+        count = self.history_list.count()
+        if count == 0:
+            return
+            
+        all_selected = True
+        for i in range(count):
+            item = self.history_list.item(i)
+            if item.flags() != Qt.NoItemFlags and not item.isSelected():
+                all_selected = False
+                break
+                
+        if all_selected:
+            self.history_list.clearSelection()
+        else:
+            self.history_list.selectAll()
 
     def _render_history(self) -> None:
         selected_paths: set[str] = set()
@@ -661,7 +678,7 @@ class HelpDialog(QDialog):
             ("Space", "Open quick preview for the focused image"),
             ("c", "Copy selected image(s) to the clipboard"),
             ("Click", "Toggle selection on an image"),
-            ("Cmd+A / Ctrl+A", "Select all images"),
+            ("Cmd+A / Ctrl+A", "Select / Deselect all images"),
             ("Esc", "Deselect all images"),
             ("10 / 20 / All", "Change how many thumbnails are visible"),
         ]
