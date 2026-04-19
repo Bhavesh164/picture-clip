@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self._preview_dialog: QuickPreviewDialog | None = None
         self._default_thumbnail_columns = 4
         self._minimum_thumbnail_cell_width = 180
-        self._thumbnail_layout_slack = 64
+        self._thumbnail_layout_slack = 4
         self._window_presented = False
 
         central = QWidget(self)
@@ -124,12 +124,10 @@ class MainWindow(QMainWindow):
         self.history_list.setMovement(QListWidget.Static)
         self.history_list.setIconSize(QSize(180, 124))
         self.history_list.setGridSize(QSize(196, 158))
-        self.history_list.setSpacing(8)
         self.history_list.setWordWrap(False)
         self.history_list.setUniformItemSizes(True)
         self.history_list.setWrapping(True)
         self.history_list.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.history_list.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.history_list.setDragEnabled(False)
         self.history_list.itemSelectionChanged.connect(self._sync_selection_state)
         self.history_list.itemDoubleClicked.connect(lambda _: self._emit_copy_request())
