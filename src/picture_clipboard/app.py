@@ -19,7 +19,6 @@ class PictureClipboardApp:
     def __init__(self) -> None:
         self.qt_app = QApplication(sys.argv)
         self.qt_app.setApplicationName("Picture Clipboard")
-        self.qt_app.setOrganizationName("Kilo")
         self.qt_app.setQuitOnLastWindowClosed(False)
         self.qt_app.setWindowIcon(create_app_icon())
 
