@@ -356,10 +356,7 @@ class MainWindow(QMainWindow):
                 if item is not None:
                     self._show_preview_for_item(item)
                     return True
-            # Enter / Return → copy selected
-            if key in {Qt.Key_Return, Qt.Key_Enter} and self.history_list.selectedItems():
-                self._emit_copy_request()
-                return True
+
         if event.type() in {QEvent.ShortcutOverride, QEvent.KeyPress} and self._should_handle_navigation_event(watched, event):
             if event.type() == QEvent.ShortcutOverride:
                 event.accept()
@@ -663,7 +660,6 @@ class HelpDialog(QDialog):
             ("h j k l or Arrow Keys", "Move through saved thumbnails"),
             ("Space", "Open quick preview for the focused image"),
             ("c", "Copy selected image(s) to the clipboard"),
-            ("Enter / Return", "Copy selected image(s) to the clipboard"),
             ("Click", "Toggle selection on an image"),
             ("Cmd+A / Ctrl+A", "Select all images"),
             ("Esc", "Deselect all images"),
