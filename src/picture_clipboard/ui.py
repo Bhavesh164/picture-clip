@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self._preview_dialog: QuickPreviewDialog | None = None
         self._default_thumbnail_columns = 4
         self._minimum_thumbnail_cell_width = 180
-        self._thumbnail_layout_slack = 16
+        self._thumbnail_layout_slack = 64
         self._window_presented = False
 
         central = QWidget(self)
