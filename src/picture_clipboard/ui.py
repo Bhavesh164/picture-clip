@@ -225,16 +225,6 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
-        
-        # On macOS, forcefully bring the app to the front
-        if sys.platform == "darwin":
-            try:
-                from AppKit import NSApplication, NSApplicationActivateIgnoringOtherApps
-                ns_app = NSApplication.sharedApplication()
-                ns_app.activateIgnoringOtherApps_(True)
-            except Exception:
-                pass
-
         app = QApplication.instance()
         if app is not None:
             app.setActiveWindow(self)
@@ -243,11 +233,10 @@ class MainWindow(QMainWindow):
 
     def hide_window(self) -> None:
         self._window_presented = False
-        self.setWindowState(self.windowState() | Qt.WindowMinimized)
         self.hide()
 
     def toggle_visibility(self) -> None:
-        if self.isVisible() and not self.isMinimized() and self.isActiveWindow():
+        if self.isVisible() and not self.isMinimized():
             self.hide_window()
         else:
             self.show_window()

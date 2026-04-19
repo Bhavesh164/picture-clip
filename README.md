@@ -131,5 +131,5 @@ After building, test these on the target OS:
 ## Notes
 
 - The app stores images under the platform app-data directory used by Qt.
-- Global hotkeys may require extra permissions on macOS and can be limited by some Linux Wayland environments.
+- **macOS Global Hotkeys**: Global hotkeys require **Accessibility** and **Input Monitoring** permissions on macOS. If your global hotkey stops working on a fresh build, or you rebuild the `.app` bundle from `./build.sh` and overwrite the older version in `/Applications`, macOS will see the new application signature and silently revoke permissions without prompting you again! Go to _System Settings -> Privacy & Security -> Accessibility_ (and also _Input Monitoring_), remove `PictureClipboard` using the minus (`-`) button, and relaunch the app to be prompted again.
 - You can now select and copy multiple images simultaneously. The paths to multiple images are copied via `text/uri-list`, allowing bulk pasting into Finder, file explorers, and messaging applications.
