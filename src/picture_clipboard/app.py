@@ -48,6 +48,7 @@ class PictureClipboardApp:
 
         self.hotkey_manager = GlobalHotkeyManager(self.window)
         self._last_hotkey_toggle_at = 0.0
+        self._skip_next_clipboard_capture: tuple[int, int, float] | None = None
         self.hotkey_manager.activated.connect(self.handle_hotkey_activation)
         self.hotkey_manager.error.connect(self.window.notify_hotkey_issue)
 
@@ -59,6 +60,8 @@ class PictureClipboardApp:
 
     def capture_image(self, image: QImage) -> None:
         if image.isNull():
+            return
+        if self._should_skip_programmatic_clipboard_capture(image):
             return
 
         item, png_bytes = self.store.create_item(image)
@@ -127,8 +130,20 @@ class PictureClipboardApp:
         self.history = self.store.prune(self.history, self.settings.max_images)
         self.store.save_history(self.history)
         self.window.set_history(self.history)
-        self.clipboard.setPixmap(QPixmap.fromImage(image))
+        self._skip_next_clipboard_capture = (item.width, item.height, time.monotonic())
+        self.clipboard.setImage(image)
         self.window.set_status(f"Saved annotated image {item.width}x{item.height} and copied it")
+
+    def _should_skip_programmatic_clipboard_capture(self, image: QImage) -> bool:
+        if self._skip_next_clipboard_capture is None:
+            return False
+
+        width, height, created_at = self._skip_next_clipboard_capture
+        expired = time.monotonic() - created_at > 2.0
+        same_size = image.width() == width and image.height() == height
+        if expired or same_size:
+            self._skip_next_clipboard_capture = None
+        return same_size and not expired
 
     def save_settings(self, settings: AppSettings) -> None:
         self.settings = settings

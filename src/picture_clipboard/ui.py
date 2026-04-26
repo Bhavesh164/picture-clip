@@ -508,7 +508,7 @@ class MainWindow(QMainWindow):
         self._preview_dialog.raise_()
         self._preview_dialog.activateWindow()
 
-    def _navigate_preview(self, offset: int) -> None:
+    def _navigate_preview(self, direction: str) -> None:
         if self.history_list.count() == 0:
             return
         current_item = self.history_list.currentItem()
@@ -519,12 +519,21 @@ class MainWindow(QMainWindow):
             current_row = 0
         else:
             current_row = self.history_list.row(current_item)
-            
-        new_row = current_row + offset
-        if new_row < 0:
-            new_row = 0
-        elif new_row >= self.history_list.count():
-            new_row = self.history_list.count() - 1
+
+        grid_w = self.history_list.gridSize().width()
+        viewport_w = self.history_list.viewport().width()
+        cols = max(1, viewport_w // grid_w) if grid_w > 0 else 1
+
+        if direction == "left":
+            new_row = max(0, current_row - 1)
+        elif direction == "right":
+            new_row = min(self.history_list.count() - 1, current_row + 1)
+        elif direction == "down":
+            new_row = min(self.history_list.count() - 1, current_row + cols)
+        elif direction == "up":
+            new_row = max(0, current_row - cols)
+        else:
+            return
             
         target_item = self.history_list.item(new_row)
         if target_item is not None and target_item.flags() != Qt.NoItemFlags:
@@ -690,6 +699,7 @@ class HelpDialog(QDialog):
             ("h j k l or Arrow Keys", "Move through saved thumbnails"),
             ("Space", "Open quick preview for the focused image"),
             ("e in preview", "Toggle annotation tools"),
+            ("g in edit preview", "Choose highlight"),
             ("s in preview", "Save annotated copy"),
             ("z in edit preview", "Undo last annotation"),
             ("c in edit preview", "Clear annotations"),
@@ -1012,6 +1022,7 @@ class QuickPreviewDialog(QWidget):
         self.clear_button = QPushButton("Clear")
         self.save_button = QPushButton("Save Copy")
         for button in (
+            self.edit_button,
             self.highlight_button,
             self.pen_button,
             self.erase_button,
@@ -1019,6 +1030,7 @@ class QuickPreviewDialog(QWidget):
             self.clear_button,
             self.save_button,
         ):
+            button.setFocusPolicy(Qt.NoFocus)
             button.setEnabled(False)
         toolbar.addWidget(self.edit_button)
         toolbar.addWidget(self.highlight_button)
@@ -1039,7 +1051,7 @@ class QuickPreviewDialog(QWidget):
         meta.addStretch(1)
         meta.addWidget(self.timestamp_label)
 
-        hint = QLabel("Esc closes preview · e toggles edit · h/p/r tools · z undo · c clear · s save")
+        hint = QLabel("Esc closes preview · e edit · g/p/r tools · z undo · c clear · s save")
         hint.setAlignment(Qt.AlignCenter)
         hint.setStyleSheet("color:#8092ad;")
 
@@ -1047,6 +1059,7 @@ class QuickPreviewDialog(QWidget):
         root.addWidget(self.canvas, stretch=1)
         root.addLayout(meta)
         root.addWidget(hint)
+        self.canvas.installEventFilter(self)
 
         self.edit_button.clicked.connect(self._toggle_editing)
         self.highlight_button.clicked.connect(lambda: self._set_tool("highlight"))
@@ -1094,6 +1107,8 @@ class QuickPreviewDialog(QWidget):
     def set_image(self, image_path: str, dimensions: str, timestamp: str) -> None:
         self._source_image = QImage(image_path)
         self.canvas.set_image(self._source_image)
+        self._editing = False
+        self.canvas.set_editing(False)
         self._dirty = False
         if self._source_image.isNull():
             self.dimensions_label.setText("")
@@ -1103,52 +1118,65 @@ class QuickPreviewDialog(QWidget):
         self.dimensions_label.setText(dimensions)
         self.timestamp_label.setText(timestamp)
         self._sync_edit_controls()
+        self.setFocus(Qt.OtherFocusReason)
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self._handle_key_event(event):
+            return
+        super().keyPressEvent(event)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if watched is self.canvas and event.type() == QEvent.KeyPress:
+            return self._handle_key_event(event)
+        return super().eventFilter(watched, event)
+
+    def _handle_key_event(self, event) -> bool:
         key = event.key()
         if key == Qt.Key_Escape:
             self.close()
             event.accept()
-            return
+            return True
         elif key == Qt.Key_E:
             self._toggle_editing()
             event.accept()
-            return
-        elif self._editing and key == Qt.Key_H:
+            return True
+        elif self._editing and key == Qt.Key_G:
             self._set_tool("highlight")
             event.accept()
-            return
+            return True
         elif self._editing and key == Qt.Key_P:
             self._set_tool("pen")
             event.accept()
-            return
+            return True
         elif self._editing and key == Qt.Key_R:
             self._set_tool("erase")
             event.accept()
-            return
+            return True
         elif self._editing and key == Qt.Key_Z:
             self.canvas.undo_annotation()
             event.accept()
-            return
+            return True
         elif self._editing and key == Qt.Key_C:
             self.canvas.clear_annotations()
             event.accept()
-            return
+            return True
         elif self._editing and key == Qt.Key_S:
             self._save_copy()
             event.accept()
-            return
+            return True
         elif key in {Qt.Key_H, Qt.Key_Left, Qt.Key_K, Qt.Key_Up}:
             if hasattr(self.parent(), "_navigate_preview"):
-                self.parent()._navigate_preview(-1)
+                direction = "left" if key in {Qt.Key_H, Qt.Key_Left} else "up"
+                self.parent()._navigate_preview(direction)
             event.accept()
-            return
+            return True
         elif key in {Qt.Key_L, Qt.Key_Right, Qt.Key_J, Qt.Key_Down}:
             if hasattr(self.parent(), "_navigate_preview"):
-                self.parent()._navigate_preview(1)
+                direction = "right" if key in {Qt.Key_L, Qt.Key_Right} else "down"
+                self.parent()._navigate_preview(direction)
             event.accept()
-            return
-        super().keyPressEvent(event)
+            return True
+        return False
 
     def _toggle_editing(self) -> None:
         if self._source_image.isNull():

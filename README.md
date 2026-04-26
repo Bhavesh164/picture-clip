@@ -18,7 +18,7 @@ Picture Clipboard is a cross-platform Python desktop app for image-only clipboar
 - `h`, `j`, `k`, `l` or `Arrow Keys`: Move through saved image thumbnails
 - `Space`: Open quick preview for the focused image
 - `e` in preview: Toggle annotation tools
-- `h` / `p` / `r` in edit preview: Choose highlight, pen, or erase
+- `g` / `p` / `r` in edit preview: Choose highlight, pen, or erase
 - `z` in edit preview: Undo the last annotation
 - `c` in edit preview: Clear annotations
 - `s` in edit preview: Save the annotated image as a new history item
