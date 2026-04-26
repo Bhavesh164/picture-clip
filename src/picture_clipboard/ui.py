@@ -54,7 +54,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Picture Clipboard")
         self.resize(1120, 760)
         self._history: list[HistoryItem] = []
-        self._visible_limit: int | None = 10
+        self._visible_limit = 5
+        self._max_images = 5
         self._preview_dialog: QuickPreviewDialog | None = None
         self._default_thumbnail_columns = 4
         self._minimum_thumbnail_cell_width = 180
@@ -92,9 +93,8 @@ class MainWindow(QMainWindow):
 
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
+        self.show_5_button = QPushButton("5")
         self.show_10_button = QPushButton("10")
-        self.show_20_button = QPushButton("20")
-        self.show_all_button = QPushButton("All")
         self.copy_button = QPushButton("Copy")
         self.copy_button.setEnabled(False)
         self.help_button = QPushButton("Help")
@@ -103,9 +103,8 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel("Waiting for clipboard images")
         self.status_label.setObjectName("status")
 
+        toolbar.addWidget(self.show_5_button)
         toolbar.addWidget(self.show_10_button)
-        toolbar.addWidget(self.show_20_button)
-        toolbar.addWidget(self.show_all_button)
         toolbar.addStretch(1)
         toolbar.addWidget(self.copy_button)
         toolbar.addWidget(self.help_button)
@@ -140,10 +139,6 @@ class MainWindow(QMainWindow):
         panel_layout.setContentsMargins(12, 14, 12, 12)
         panel_layout.setSpacing(8)
 
-        self.max_images_spin = QSpinBox()
-        self.max_images_spin.setRange(1, 500)
-        self.max_images_spin.setButtonSymbols(QSpinBox.NoButtons)
-        self.max_images_spin.setMinimumWidth(0)
         self.poll_interval_spin = QSpinBox()
         self.poll_interval_spin.setRange(250, 5000)
         self.poll_interval_spin.setSingleStep(50)
@@ -154,7 +149,6 @@ class MainWindow(QMainWindow):
         self.start_hidden_checkbox = QCheckBox("Start minimized to tray")
         self.start_hidden_checkbox.setToolTip("When checked, the app launches silently to the system tray without showing this window.")
 
-        panel_layout.addLayout(self._stacked_setting("Stored images", self.max_images_spin))
         panel_layout.addLayout(self._stacked_setting("Poll interval (ms)", self.poll_interval_spin))
         panel_layout.addLayout(self._stacked_setting("Global hotkey", self.hotkey_input))
         panel_layout.addWidget(self.start_hidden_checkbox)
@@ -168,9 +162,8 @@ class MainWindow(QMainWindow):
         footer.addStretch(1)
         root.addLayout(footer)
 
-        self.show_10_button.clicked.connect(lambda: self.set_visible_limit(10))
-        self.show_20_button.clicked.connect(lambda: self.set_visible_limit(20))
-        self.show_all_button.clicked.connect(lambda: self.set_visible_limit(None))
+        self.show_5_button.clicked.connect(lambda: self.set_history_size(5))
+        self.show_10_button.clicked.connect(lambda: self.set_history_size(10))
         self.copy_button.clicked.connect(self._emit_copy_request)
         self.help_button.clicked.connect(self.show_help_dialog)
         self.settings_button.clicked.connect(self._emit_settings_request)
@@ -208,7 +201,9 @@ class MainWindow(QMainWindow):
         self._render_history()
 
     def set_settings(self, settings: AppSettings) -> None:
-        self.max_images_spin.setValue(settings.max_images)
+        self._max_images = settings.max_images
+        self._visible_limit = settings.max_images
+        self._sync_history_size_buttons()
         self.poll_interval_spin.setValue(settings.poll_interval_ms)
         self.hotkey_input.setText(display_global_hotkey(settings.global_hotkey))
         self.start_hidden_checkbox.setChecked(settings.start_hidden)
@@ -216,9 +211,12 @@ class MainWindow(QMainWindow):
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
-    def set_visible_limit(self, limit: int | None) -> None:
-        self._visible_limit = limit
+    def set_history_size(self, max_images: int) -> None:
+        self._max_images = 5 if max_images <= 5 else 10
+        self._visible_limit = self._max_images
+        self._sync_history_size_buttons()
         self._render_history()
+        self._emit_settings_request()
 
     def show_window(self) -> None:
         self.showNormal()
@@ -282,12 +280,20 @@ class MainWindow(QMainWindow):
 
     def _emit_settings_request(self) -> None:
         settings = AppSettings(
-            max_images=self.max_images_spin.value(),
+            max_images=self._max_images,
             poll_interval_ms=self.poll_interval_spin.value(),
             global_hotkey=parse_global_hotkey(self.hotkey_input.text()),
             start_hidden=self.start_hidden_checkbox.isChecked(),
         ).normalized()
         self.settings_requested.emit(settings)
+
+    def _sync_history_size_buttons(self) -> None:
+        self.show_5_button.setProperty("selected", self._max_images == 5)
+        self.show_10_button.setProperty("selected", self._max_images == 10)
+        self.show_5_button.style().unpolish(self.show_5_button)
+        self.show_5_button.style().polish(self.show_5_button)
+        self.show_10_button.style().unpolish(self.show_10_button)
+        self.show_10_button.style().polish(self.show_10_button)
 
     def _sync_selection_state(self) -> None:
         self.copy_button.setEnabled(len(self.history_list.selectedItems()) > 0)
@@ -317,7 +323,7 @@ class MainWindow(QMainWindow):
                 selected_paths.add(str(p))
 
         self.history_list.clear()
-        visible_items = self._history if self._visible_limit is None else self._history[: self._visible_limit]
+        visible_items = self._history[: self._visible_limit]
         for item in visible_items:
             pixmap = QPixmap(item.preview_path)
             list_item = QListWidgetItem(QIcon(pixmap), f"{item.width} x {item.height}")
@@ -597,6 +603,11 @@ class MainWindow(QMainWindow):
                 background: #202a37;
                 border-color: #3c4c66;
             }
+            QPushButton[selected="true"] {
+                background: #21344f;
+                border-color: #65a4ff;
+                color: #ffffff;
+            }
             QPushButton:disabled {
                 background: #121821;
                 color: #62718a;
@@ -678,7 +689,7 @@ class HelpDialog(QDialog):
             ("Click", "Toggle selection on an image"),
             ("Cmd+A / Ctrl+A", "Select / Deselect all images"),
             ("Esc", "Deselect all images"),
-            ("10 / 20 / All", "Change how many thumbnails are visible"),
+            ("5 / 10", "Choose how many clipboard images are stored"),
         ]
         
         grid = QGridLayout()

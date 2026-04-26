@@ -88,7 +88,7 @@ class AppSettings:
 
     def normalized(self) -> "AppSettings":
         return AppSettings(
-            max_images=max(1, min(self.max_images, 500)),
+            max_images=5 if self.max_images <= 5 else 10,
             poll_interval_ms=max(250, min(self.poll_interval_ms, 5000)),
             global_hotkey=normalize_global_hotkey(self.global_hotkey),
             start_hidden=bool(self.start_hidden),
