@@ -10,7 +10,7 @@ Picture Clipboard is a cross-platform Python desktop app for image-only clipboar
 - Preview grid with quick restore back to the clipboard.
 - Quick preview annotation with rectangular highlight, pen, erase, clear, and save-as-new-copy.
 - Keep the latest `5` images by default, with a quick `10` image option.
-- Tray-based app with a configurable global hotkey, defaulting to `Ctrl+Shift+V`.
+- Tray-based app with a configurable global hotkey, defaulting to `Ctrl+Shift+B`.
 - JSON-backed settings and file-backed PNG storage for low overhead and simple packaging.
 
 ## Keyboard Shortcuts & Navigation
