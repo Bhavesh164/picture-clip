@@ -36,6 +36,7 @@ class PictureClipboardApp:
         self.window.copy_requested.connect(self.copy_image_to_clipboard)
         self.window.settings_requested.connect(self.save_settings)
         self.window.open_folder_requested.connect(self.open_storage_folder)
+        self.window.annotation_saved.connect(self.save_annotated_image)
 
         self.clipboard = QGuiApplication.clipboard()
         self.monitor = ClipboardMonitor(
@@ -115,6 +116,19 @@ class PictureClipboardApp:
                 if not pixmap.isNull():
                     self.clipboard.setPixmap(pixmap)
                 self.window.set_status(f"Copied {len(valid_paths)} images (last as pixmap)")
+
+    def save_annotated_image(self, image: QImage) -> None:
+        if image.isNull():
+            return
+
+        item, png_bytes = self.store.create_item(image)
+        self.store.persist_item(item, image, png_bytes)
+        self.history.insert(0, item)
+        self.history = self.store.prune(self.history, self.settings.max_images)
+        self.store.save_history(self.history)
+        self.window.set_history(self.history)
+        self.clipboard.setPixmap(QPixmap.fromImage(image))
+        self.window.set_status(f"Saved annotated image {item.width}x{item.height} and copied it")
 
     def save_settings(self, settings: AppSettings) -> None:
         self.settings = settings

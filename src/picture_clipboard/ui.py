@@ -3,16 +3,18 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
     QFont,
     QIcon,
+    QImage,
     QKeySequence,
     QPainter,
     QPainterPath,
+    QPen,
     QPixmap,
     QPolygon,
     QShortcut,
@@ -48,6 +50,7 @@ class MainWindow(QMainWindow):
     settings_requested = Signal(AppSettings)
     open_folder_requested = Signal()
     visibility_toggled = Signal()
+    annotation_saved = Signal(QImage)
 
     def __init__(self) -> None:
         super().__init__()
@@ -495,6 +498,7 @@ class MainWindow(QMainWindow):
             return
         if self._preview_dialog is None:
             self._preview_dialog = QuickPreviewDialog(self)
+            self._preview_dialog.save_requested.connect(self.annotation_saved.emit)
         self._preview_dialog.set_image(
             str(image_path),
             item.data(Qt.UserRole + 2) or "",
@@ -685,6 +689,10 @@ class HelpDialog(QDialog):
             (launch_hotkey, "Show or hide the app globally"),
             ("h j k l or Arrow Keys", "Move through saved thumbnails"),
             ("Space", "Open quick preview for the focused image"),
+            ("e in preview", "Toggle annotation tools"),
+            ("s in preview", "Save annotated copy"),
+            ("z in edit preview", "Undo last annotation"),
+            ("c in edit preview", "Clear annotations"),
             ("c", "Copy selected image(s) to the clipboard"),
             ("Click", "Toggle selection on an image"),
             ("Cmd+A / Ctrl+A", "Select / Deselect all images"),
@@ -727,23 +735,301 @@ class HelpDialog(QDialog):
         layout.addLayout(btn_layout)
 
 
+class AnnotationStroke:
+    def __init__(
+        self,
+        points: list[QPointF],
+        color: QColor,
+        width: float,
+        erase: bool = False,
+        shape: str = "path",
+    ) -> None:
+        self.points = points
+        self.color = color
+        self.width = width
+        self.erase = erase
+        self.shape = shape
+
+
+class AnnotationCanvas(QWidget):
+    changed = Signal(bool)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumSize(640, 420)
+        self.setMouseTracking(True)
+        self.setStyleSheet("background:#0b1118; border:1px solid #232d3d; border-radius:16px;")
+        self._image = QImage()
+        self._strokes: list[AnnotationStroke] = []
+        self._active_stroke: AnnotationStroke | None = None
+        self._editing = False
+        self._tool = "highlight"
+        self._target_rect = QRectF()
+
+    def set_image(self, image: QImage) -> None:
+        self._image = image
+        self._strokes.clear()
+        self._active_stroke = None
+        self.changed.emit(False)
+        self.update()
+
+    def set_editing(self, editing: bool) -> None:
+        self._editing = editing
+        self.setCursor(Qt.CrossCursor if editing else Qt.ArrowCursor)
+
+    def set_tool(self, tool: str) -> None:
+        self._tool = tool
+
+    def clear_annotations(self) -> None:
+        if not self._strokes and self._active_stroke is None:
+            return
+        self._strokes.clear()
+        self._active_stroke = None
+        self.changed.emit(False)
+        self.update()
+
+    def undo_annotation(self) -> None:
+        if not self._strokes:
+            return
+        self._strokes.pop()
+        self._active_stroke = None
+        self.changed.emit(bool(self._strokes))
+        self.update()
+
+    def has_annotations(self) -> bool:
+        return bool(self._strokes)
+
+    def annotated_image(self) -> QImage:
+        if self._image.isNull():
+            return QImage()
+        result = self._image.convertToFormat(QImage.Format_ARGB32)
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.Antialiasing)
+        self._paint_strokes(painter)
+        painter.end()
+        return result
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#0b1118"))
+
+        if self._image.isNull():
+            painter.setPen(QColor("#8092ad"))
+            painter.drawText(self.rect(), Qt.AlignCenter, "Preview unavailable")
+            painter.end()
+            return
+
+        self._target_rect = self._fit_rect()
+        painter.drawImage(self._target_rect, self._image)
+        scale = self._target_rect.width() / max(1, self._image.width())
+        painter.save()
+        painter.translate(self._target_rect.topLeft())
+        painter.scale(scale, scale)
+        self._paint_strokes(painter)
+        if self._active_stroke is not None:
+            self._paint_stroke(painter, self._active_stroke)
+        painter.restore()
+        painter.end()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._target_rect = self._fit_rect()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if not self._editing or event.button() != Qt.LeftButton or self._image.isNull():
+            super().mousePressEvent(event)
+            return
+        point = self._image_point(event.position())
+        if point is None:
+            return
+        color, screen_width, erase, shape = self._tool_style()
+        scale = self._target_rect.width() / max(1, self._image.width())
+        self._active_stroke = AnnotationStroke(
+            [point],
+            color,
+            screen_width / max(scale, 0.01),
+            erase,
+            shape,
+        )
+        self.update()
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        if self._active_stroke is None:
+            super().mouseMoveEvent(event)
+            return
+        point = self._image_point(event.position())
+        if point is None:
+            return
+        if self._active_stroke.shape == "rect":
+            self._active_stroke.points = [self._active_stroke.points[0], point]
+        else:
+            self._active_stroke.points.append(point)
+        self.changed.emit(True)
+        self.update()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        if self._active_stroke is None or event.button() != Qt.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        if len(self._active_stroke.points) == 1:
+            self._active_stroke.points.append(self._active_stroke.points[0])
+        if self._active_stroke.erase:
+            changed = self._erase_strokes_near(self._active_stroke.points, self._active_stroke.width)
+            self.changed.emit(changed or bool(self._strokes))
+        else:
+            self._strokes.append(self._active_stroke)
+            self.changed.emit(True)
+        self._active_stroke = None
+        self.update()
+
+    def _fit_rect(self) -> QRectF:
+        if self._image.isNull():
+            return QRectF()
+        bounds = QRectF(self.rect()).adjusted(10, 10, -10, -10)
+        image_ratio = self._image.width() / max(1, self._image.height())
+        bounds_ratio = bounds.width() / max(1.0, bounds.height())
+        if image_ratio > bounds_ratio:
+            width = bounds.width()
+            height = width / image_ratio
+        else:
+            height = bounds.height()
+            width = height * image_ratio
+        return QRectF(
+            bounds.x() + (bounds.width() - width) / 2,
+            bounds.y() + (bounds.height() - height) / 2,
+            width,
+            height,
+        )
+
+    def _image_point(self, widget_point: QPointF) -> QPointF | None:
+        if self._target_rect.isNull():
+            self._target_rect = self._fit_rect()
+        if not self._target_rect.contains(widget_point):
+            return None
+        x = (widget_point.x() - self._target_rect.x()) * self._image.width() / self._target_rect.width()
+        y = (widget_point.y() - self._target_rect.y()) * self._image.height() / self._target_rect.height()
+        return QPointF(x, y)
+
+    def _tool_style(self) -> tuple[QColor, float, bool, str]:
+        if self._tool == "pen":
+            return QColor("#ff5a68"), 3.0, False, "path"
+        if self._tool == "erase":
+            return QColor(255, 255, 255, 120), 30.0, True, "path"
+        return QColor("#ff2f45"), 3.0, False, "rect"
+
+    def _paint_strokes(self, painter: QPainter) -> None:
+        for stroke in self._strokes:
+            self._paint_stroke(painter, stroke)
+
+    def _paint_stroke(self, painter: QPainter, stroke: AnnotationStroke) -> None:
+        if not stroke.points:
+            return
+        if stroke.shape == "rect":
+            self._paint_rect_stroke(painter, stroke)
+            return
+
+        path = QPainterPath(stroke.points[0])
+        for point in stroke.points[1:]:
+            path.lineTo(point)
+
+        painter.save()
+        pen = QPen(stroke.color, max(1.0, stroke.width))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        if stroke.erase:
+            pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        painter.restore()
+
+    def _paint_rect_stroke(self, painter: QPainter, stroke: AnnotationStroke) -> None:
+        if len(stroke.points) < 2:
+            return
+        rect = QRectF(stroke.points[0], stroke.points[-1]).normalized()
+        if rect.width() < 1 or rect.height() < 1:
+            return
+        painter.save()
+        pen = QPen(stroke.color, max(1.0, stroke.width))
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawRect(rect)
+        painter.restore()
+
+    def _erase_strokes_near(self, points: list[QPointF], radius: float) -> bool:
+        original_count = len(self._strokes)
+        self._strokes = [
+            stroke
+            for stroke in self._strokes
+            if not self._stroke_hits_eraser(stroke, points, radius)
+        ]
+        return len(self._strokes) != original_count
+
+    def _stroke_hits_eraser(
+        self,
+        stroke: AnnotationStroke,
+        eraser_points: list[QPointF],
+        radius: float,
+    ) -> bool:
+        threshold = radius + stroke.width / 2
+        threshold_sq = threshold * threshold
+        if stroke.shape == "rect" and len(stroke.points) >= 2:
+            rect = QRectF(stroke.points[0], stroke.points[-1]).normalized()
+            inflated = rect.adjusted(-threshold, -threshold, threshold, threshold)
+            return any(inflated.contains(point) for point in eraser_points)
+        for stroke_point in stroke.points:
+            for eraser_point in eraser_points:
+                dx = stroke_point.x() - eraser_point.x()
+                dy = stroke_point.y() - eraser_point.y()
+                if dx * dx + dy * dy <= threshold_sq:
+                    return True
+        return False
+
+
 class QuickPreviewDialog(QWidget):
+    save_requested = Signal(QImage)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.Dialog | Qt.WindowStaysOnTopHint)
         self.setWindowTitle("Quick Preview")
         self.resize(940, 720)
-        self._source_pixmap = QPixmap()
+        self._source_image = QImage()
+        self._editing = False
+        self._dirty = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
 
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumSize(640, 420)
-        self.image_label.setStyleSheet(
-            "background:#0b1118; border:1px solid #232d3d; border-radius:16px;"
-        )
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+        self.edit_button = QPushButton("Edit")
+        self.highlight_button = QPushButton("Highlight")
+        self.pen_button = QPushButton("Pen")
+        self.erase_button = QPushButton("Erase")
+        self.undo_button = QPushButton("Undo")
+        self.clear_button = QPushButton("Clear")
+        self.save_button = QPushButton("Save Copy")
+        for button in (
+            self.highlight_button,
+            self.pen_button,
+            self.erase_button,
+            self.undo_button,
+            self.clear_button,
+            self.save_button,
+        ):
+            button.setEnabled(False)
+        toolbar.addWidget(self.edit_button)
+        toolbar.addWidget(self.highlight_button)
+        toolbar.addWidget(self.pen_button)
+        toolbar.addWidget(self.erase_button)
+        toolbar.addWidget(self.undo_button)
+        toolbar.addWidget(self.clear_button)
+        toolbar.addStretch(1)
+        toolbar.addWidget(self.save_button)
+
+        self.canvas = AnnotationCanvas()
 
         meta = QHBoxLayout()
         self.dimensions_label = QLabel()
@@ -753,13 +1039,23 @@ class QuickPreviewDialog(QWidget):
         meta.addStretch(1)
         meta.addWidget(self.timestamp_label)
 
-        hint = QLabel("Esc closes preview")
+        hint = QLabel("Esc closes preview · e toggles edit · h/p/r tools · z undo · c clear · s save")
         hint.setAlignment(Qt.AlignCenter)
         hint.setStyleSheet("color:#8092ad;")
 
-        root.addWidget(self.image_label, stretch=1)
+        root.addLayout(toolbar)
+        root.addWidget(self.canvas, stretch=1)
         root.addLayout(meta)
         root.addWidget(hint)
+
+        self.edit_button.clicked.connect(self._toggle_editing)
+        self.highlight_button.clicked.connect(lambda: self._set_tool("highlight"))
+        self.pen_button.clicked.connect(lambda: self._set_tool("pen"))
+        self.erase_button.clicked.connect(lambda: self._set_tool("erase"))
+        self.undo_button.clicked.connect(self.canvas.undo_annotation)
+        self.clear_button.clicked.connect(self.canvas.clear_annotations)
+        self.save_button.clicked.connect(self._save_copy)
+        self.canvas.changed.connect(self._set_dirty)
 
         self.setStyleSheet(
             """
@@ -768,37 +1064,78 @@ class QuickPreviewDialog(QWidget):
                 color: #ecf3fd;
                 font-family: "Avenir Next", "Segoe UI", sans-serif;
             }
+            QPushButton {
+                background: #171e28;
+                color: #f4f8ff;
+                border: 1px solid #2b3648;
+                border-radius: 8px;
+                padding: 6px 12px;
+                min-height: 28px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: #202a37;
+                border-color: #3c4c66;
+            }
+            QPushButton[active="true"] {
+                background: #21344f;
+                border-color: #65a4ff;
+            }
+            QPushButton:disabled {
+                background: #121821;
+                color: #62718a;
+                border-color: #1f2937;
+            }
             """
         )
+        self._set_tool("highlight")
+        self._sync_edit_controls()
 
     def set_image(self, image_path: str, dimensions: str, timestamp: str) -> None:
-        self._source_pixmap = QPixmap(image_path)
-        if self._source_pixmap.isNull():
-            self.image_label.setText("Preview unavailable")
-            self.image_label.setPixmap(QPixmap())
+        self._source_image = QImage(image_path)
+        self.canvas.set_image(self._source_image)
+        self._dirty = False
+        if self._source_image.isNull():
+            self.dimensions_label.setText("")
+            self.timestamp_label.setText("")
+            self._sync_edit_controls()
             return
         self.dimensions_label.setText(dimensions)
         self.timestamp_label.setText(timestamp)
-        self._render_pixmap()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._render_pixmap()
-
-    def _render_pixmap(self) -> None:
-        if self._source_pixmap.isNull():
-            return
-        scaled = self._source_pixmap.scaled(
-            self.image_label.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
-        self.image_label.setPixmap(scaled)
+        self._sync_edit_controls()
 
     def keyPressEvent(self, event) -> None:  # noqa: N802
         key = event.key()
         if key == Qt.Key_Escape:
             self.close()
+            event.accept()
+            return
+        elif key == Qt.Key_E:
+            self._toggle_editing()
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_H:
+            self._set_tool("highlight")
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_P:
+            self._set_tool("pen")
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_R:
+            self._set_tool("erase")
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_Z:
+            self.canvas.undo_annotation()
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_C:
+            self.canvas.clear_annotations()
+            event.accept()
+            return
+        elif self._editing and key == Qt.Key_S:
+            self._save_copy()
             event.accept()
             return
         elif key in {Qt.Key_H, Qt.Key_Left, Qt.Key_K, Qt.Key_Up}:
@@ -812,6 +1149,50 @@ class QuickPreviewDialog(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def _toggle_editing(self) -> None:
+        if self._source_image.isNull():
+            return
+        self._editing = not self._editing
+        self.canvas.set_editing(self._editing)
+        self._sync_edit_controls()
+
+    def _set_tool(self, tool: str) -> None:
+        self.canvas.set_tool(tool)
+        for button, button_tool in (
+            (self.highlight_button, "highlight"),
+            (self.pen_button, "pen"),
+            (self.erase_button, "erase"),
+        ):
+            button.setProperty("active", button_tool == tool)
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        self._dirty = dirty
+        self._sync_edit_controls()
+
+    def _sync_edit_controls(self) -> None:
+        can_edit = not self._source_image.isNull()
+        self.edit_button.setEnabled(can_edit)
+        self.edit_button.setProperty("active", self._editing)
+        self.edit_button.style().unpolish(self.edit_button)
+        self.edit_button.style().polish(self.edit_button)
+        for button in (self.highlight_button, self.pen_button, self.erase_button):
+            button.setEnabled(can_edit and self._editing)
+        self.undo_button.setEnabled(can_edit and self._editing and self.canvas.has_annotations())
+        self.clear_button.setEnabled(can_edit and self._editing and self.canvas.has_annotations())
+        self.save_button.setEnabled(can_edit and self._dirty and self.canvas.has_annotations())
+
+    def _save_copy(self) -> None:
+        if self._source_image.isNull() or not self.canvas.has_annotations():
+            return
+        image = self.canvas.annotated_image()
+        if image.isNull():
+            return
+        self.save_requested.emit(image)
+        self._dirty = False
+        self._sync_edit_controls()
 
 
 def create_app_icon() -> QIcon:
